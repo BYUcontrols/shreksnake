@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shrek's Swamp Snack</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bangers&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Bangers', cursive;
+            background-color: #4b543b; /* Swampy dark green */
+            color: #f0e68c; /* Khaki text */
+            touch-action: none; /* Disable panning and zooming on touch devices */
+        }
+        canvas {
+            background-color: #6B8E23; /* Olive Drab - the swamp */
+            border: 10px solid #5C4033; /* Dark brown border */
+            border-radius: 15px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.4);
+            max-width: 100%;
+            height: auto;
+            flex-shrink: 0;
+        }
+        .title-text {
+            font-size: 4rem;
+            color: #7cfc00; /* Lawngreen */
+            text-shadow: 3px 3px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+        }
+        .btn {
+            font-family: 'Bangers', cursive;
+            background-color: #8B4513; /* SaddleBrown */
+            color: white;
+            border: 4px solid #5C4033;
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .btn:hover {
+            background-color: #A0522D; /* Sienna */
+            transform: translateY(-2px);
+        }
+        .btn:active {
+            transform: translateY(1px);
+        }
+        .btn:disabled {
+            background-color: #696969;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <div class="flex flex-col lg:flex-row items-center justify-center gap-8 w-full max-w-7xl mx-auto">
+        <!-- Left Side / Info Panel -->
+        <div class="flex flex-col items-center justify-center text-center order-2 lg:order-1">
+            <h1 class="title-text">Shrek's Swamp Snack</h1>
+            <div id="score" class="text-3xl my-6">Score: 0</div>
+            <button id="startButton" class="btn">Start Game</button>
+        </div>
+
+        <!-- Right Side / Game Canvas -->
+        <div class="order-1 lg:order-2">
+            <canvas id="gameCanvas" width="840" height="840"></canvas>
+        </div>
+    </div>
+    
+    <script>
+        // --- Game Setup ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const startButton = document.getElementById('startButton');
+
+        // --- Sizing and Grid ---
+        const tileSize = 60; // This defines the logical size of a grid square.
+        let gridWidth = canvas.width / tileSize; // 14x14 grid
+        let gridHeight = canvas.height / tileSize;
+
+        // --- Cosmetic Drawing Sizes ---
+        const characterDrawSize = tileSize * 2; // Visual size of Shrek/Donkey is double the logical tile size.
+        const tailDrawSize = characterDrawSize * 0.75; // Tail is 3/4 of the character draw size.
+        const characterDrawOffset = (characterDrawSize - tileSize) / 2; // Offset to center Shrek/Donkey over the logical tile.
+        const tailDrawOffset = (tailDrawSize - tileSize) / 2; // This should be negative to center correctly. Let's recalculate.
+        const correctedTailOffset = (characterDrawSize - tailDrawSize) / 2;
+
+
+        // --- Image Loading ---
+        const imageSources = {
+            shrekLeft: 'shrekleft.jpg',
+            shrekRight: 'shrekright.jpg',
+            shrekUp: 'shrekup.jpg',
+            shrekDown: 'shrekdown.jpg',
+            donkeyLeft: 'donkeyleft.jpg',
+            donkeyRight: 'donkeyright.jpg',
+            poo: 'poo.jpg'
+        };
+        const loadedImages = {};
+        let imagesToLoad = Object.keys(imageSources).length;
+        let imagesLoaded = 0;
+
+        startButton.disabled = true;
+        startButton.textContent = 'Loading Images...';
+
+        function imageLoadedCallback() {
+            imagesLoaded++;
+            if (imagesLoaded === imagesToLoad) {
+                startButton.disabled = false;
+                startButton.textContent = 'Start Game';
+            }
+        }
+
+        for (const key in imageSources) {
+            loadedImages[key] = new Image();
+            loadedImages[key].onload = imageLoadedCallback;
+            loadedImages[key].onerror = () => { 
+                console.error(`Failed to load image: ${imageSources[key]}`);
+                imageLoadedCallback();
+            };
+            loadedImages[key].src = imageSources[key];
+        }
+
+        // --- Game State Variables ---
+        let shrek;
+        let donkey;
+        let direction;
+        let score;
+        let changingDirection;
+        let gameRunning;
+        let donkeyMoveInterval;
+        let gameLoopTimeout;
+        let shrekFacing;
+        let donkeyFacing;
+        
+        // --- Initialization ---
+        function initializeGame() {
+            shrek = [{ x: Math.floor(gridWidth / 2), y: Math.floor(gridHeight / 2) }];
+            direction = { x: 0, y: 0 };
+            shrekFacing = 'right';
+            donkeyFacing = 'left';
+            score = 0;
+            scoreElement.textContent = `Score: ${score}`;
+            changingDirection = false;
+            gameRunning = true;
+
+            placeDonkey();
+            
+            if (donkeyMoveInterval) clearInterval(donkeyMoveInterval);
+            if (gameLoopTimeout) clearTimeout(gameLoopTimeout);
+
+            donkeyMoveInterval = setInterval(moveDonkey, 2000);
+            main();
+        }
+
+        // --- Main Game Loop ---
+        function main() {
+            if (!gameRunning) {
+                gameOver();
+                return;
+            }
+
+            gameLoopTimeout = setTimeout(() => {
+                changingDirection = false;
+                clearCanvas();
+                drawDonkey();
+                moveShrek();
+                drawShrek();
+                main();
+            }, 250);
+        }
+
+        // --- Drawing Functions ---
+        function clearCanvas() {
+            ctx.fillStyle = '#6B8E23';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function drawShrek() {
+            let shrekImage;
+            switch (shrekFacing) {
+                case 'up':
+                    shrekImage = loadedImages.shrekUp;
+                    break;
+                case 'down':
+                    shrekImage = loadedImages.shrekDown;
+                    break;
+                case 'left':
+                    shrekImage = loadedImages.shrekLeft;
+                    break;
+                case 'right':
+                default:
+                    shrekImage = loadedImages.shrekRight;
+                    break;
+            }
+            const tailImage = loadedImages.poo;
+
+            // Draw the head. We subtract the offset to center the larger image on the smaller logical tile.
+            if (shrekImage && shrekImage.complete) {
+                ctx.drawImage(shrekImage, shrek[0].x * tileSize - characterDrawOffset, shrek[0].y * tileSize - characterDrawOffset, characterDrawSize, characterDrawSize);
+            }
+
+            // Draw the tail segments, also centered.
+            if (tailImage && tailImage.complete) {
+                for (let i = 1; i < shrek.length; i++) {
+                    const tailX = shrek[i].x * tileSize + (tileSize - tailDrawSize) / 2;
+                    const tailY = shrek[i].y * tileSize + (tileSize - tailDrawSize) / 2;
+                    ctx.drawImage(tailImage, tailX, tailY, tailDrawSize, tailDrawSize);
+                }
+            }
+        }
+
+        function drawDonkey() {
+            const donkeyImage = (donkeyFacing === 'left') ? loadedImages.donkeyLeft : loadedImages.donkeyRight;
+            if (donkeyImage && donkeyImage.complete) {
+                ctx.drawImage(donkeyImage, donkey.x * tileSize - characterDrawOffset, donkey.y * tileSize - characterDrawOffset, characterDrawSize, characterDrawSize);
+            }
+        }
+
+        // --- Game Logic (Unaffected by cosmetic changes) ---
+        function moveShrek() {
+            const head = { x: shrek[0].x + direction.x, y: shrek[0].y + direction.y };
+
+            if (head.x < 0 || head.x >= gridWidth || head.y < 0 || head.y >= gridHeight) {
+                gameRunning = false;
+                return;
+            }
+
+            for (let i = 1; i < shrek.length; i++) {
+                if (head.x === shrek[i].x && head.y === shrek[i].y) {
+                    gameRunning = false;
+                    return;
+                }
+            }
+            
+            shrek.unshift(head);
+
+            const ateDonkey = shrek[0].x === donkey.x && shrek[0].y === donkey.y;
+            if (ateDonkey) {
+                score += 10;
+                scoreElement.textContent = `Score: ${score}`;
+                placeDonkey();
+            } else {
+                shrek.pop();
+            }
+        }
+
+        function placeDonkey() {
+            let newDonkeyPosition;
+            do {
+                newDonkeyPosition = {
+                    x: Math.floor(Math.random() * gridWidth),
+                    y: Math.floor(Math.random() * gridHeight)
+                };
+            } while (isPositionOnShrek(newDonkeyPosition));
+            
+            donkey = newDonkeyPosition;
+        }
+        
+        function moveDonkey() {
+            if (!gameRunning) return;
+
+            const possibleMoves = [{ x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
+            const randomMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+            
+            if (randomMove.x === -1) donkeyFacing = 'left';
+            if (randomMove.x === 1) donkeyFacing = 'right';
+
+            const newPos = { x: donkey.x + randomMove.x, y: donkey.y + randomMove.y };
+
+            if (newPos.x >= 0 && newPos.x < gridWidth && newPos.y >= 0 && newPos.y < gridHeight && !isPositionOnShrek(newPos)) {
+                donkey = newPos;
+            }
+            
+            clearCanvas();
+            drawDonkey();
+            drawShrek();
+        }
+
+        function isPositionOnShrek(position) {
+            return shrek.some(segment => segment.x === position.x && segment.y === position.y);
+        }
+
+        function changeDirection(event) {
+            if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+                event.preventDefault();
+            }
+
+            if (changingDirection) return;
+            changingDirection = true;
+
+            const keyPressed = event.key;
+            const goingUp = direction.y === -1;
+            const goingDown = direction.y === 1;
+            const goingRight = direction.x === 1;
+            const goingLeft = direction.x === -1;
+
+            if ((keyPressed === "ArrowLeft" || keyPressed === "a") && !goingRight) {
+                direction = { x: -1, y: 0 };
+                shrekFacing = 'left';
+            } else if ((keyPressed === "ArrowUp" || keyPressed === "w") && !goingDown) {
+                direction = { x: 0, y: -1 };
+                shrekFacing = 'up';
+            } else if ((keyPressed === "ArrowRight" || keyPressed === "d") && !goingLeft) {
+                direction = { x: 1, y: 0 };
+                shrekFacing = 'right';
+            } else if ((keyPressed === "ArrowDown" || keyPressed === "s") && !goingUp) {
+                direction = { x: 0, y: 1 };
+                shrekFacing = 'down';
+            }
+        }
+        
+        function gameOver() {
+            clearInterval(donkeyMoveInterval);
+            clearTimeout(gameLoopTimeout);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.font = "60px 'Bangers'";
+            ctx.fillStyle = "#ff4500";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("GET OUT OF MY SWAMP!", canvas.width / 2, canvas.height / 2 - 40);
+            ctx.font = "36px 'Bangers'";
+            ctx.fillStyle = "white";
+            ctx.fillText(`Final Score: ${score}`, canvas.width / 2, canvas.height / 2 + 30);
+        }
+
+        // --- Event Listeners ---
+        document.addEventListener("keydown", changeDirection);
+        startButton.addEventListener('click', initializeGame);
+        
+    </script>
+
+</body>
+</html>
